@@ -1,0 +1,11 @@
+# Backend requirements (64-bit Python >= 3.10 with a GPU is recommended).
+# The client needs NOTHING from this file - it runs on the standard library.
+torch>=2.5.0
+transformers>=4.51.0
+safetensors
+accelerate
+huggingface_hub>=0.25.0
+pillow
+tqdm
+loguru
+numpy

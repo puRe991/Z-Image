@@ -45,17 +45,35 @@ class MockEngine(Engine):
         return (digest[0], digest[1], digest[2]), (digest[3], digest[4], digest[5])
 
     def _gradient(self, width: int, height: int, seed: int, prompt: str) -> bytearray:
+        """A two-axis colour ramp, built with byte-level operations.
+
+        A per-pixel Python loop would take seconds for a megapixel and - since
+        the demo backend can run inside the GUI process - would freeze the
+        interface it is supposed to demonstrate.  Each row is therefore assembled
+        from three precomputed planes with extended slice assignment, which runs
+        at C speed.
+        """
         (r0, g0, b0), (r1, g1, b1) = self._palette(seed, prompt)
+        last_x = float(max(1, width - 1))
+        last_y = float(max(1, height - 1))
+
+        # Green varies with x only, so its row is constant.
+        green_row = bytes(int(g0 + (g1 - g0) * (x / last_x)) % 256 for x in range(width))
+        # Red is r0 + (r1 - r0) * (fx + fy) / 2: an x ramp plus a per-row offset,
+        # and adding that offset is a byte translation.
+        red_ramp = bytes(int((r1 - r0) * (x / last_x) / 2.0) % 256 for x in range(width))
+
         out = bytearray(width * height * 3)
+        stride = width * 3
         for y in range(height):
-            fy = y / float(max(1, height - 1))
-            row = y * width * 3
-            for x in range(width):
-                fx = x / float(max(1, width - 1))
-                t = (fx + fy) * 0.5
-                out[row + x * 3] = int(r0 + (r1 - r0) * t) & 0xFF
-                out[row + x * 3 + 1] = int(g0 + (g1 - g0) * fx) & 0xFF
-                out[row + x * 3 + 2] = int(b0 + (b1 - b0) * fy) & 0xFF
+            fy = y / last_y
+            offset = int(r0 + (r1 - r0) * fy / 2.0)
+            table = bytes((value + offset) % 256 for value in range(256))
+            row = bytearray(stride)
+            row[0::3] = red_ramp.translate(table)
+            row[1::3] = green_row
+            row[2::3] = bytes((int(b0 + (b1 - b0) * fy) % 256,)) * width
+            out[y * stride : (y + 1) * stride] = row
         return out
 
     # -- Engine API --------------------------------------------------------
@@ -102,15 +120,22 @@ def _blend(
 ) -> bytearray:
     """Mix ``target`` into ``source`` by ``strength``, restricted to ``mask``."""
     strength = max(0.0, min(1.0, float(strength)))
+    if strength <= 0.0:
+        return bytearray(source)
+    if mask is None:
+        if strength >= 1.0:
+            return bytearray(target)
+        return bytearray(
+            a + int((b - a) * strength) for a, b in zip(bytes(source), bytes(target))
+        )
+
     out = bytearray(source)
-    for i in range(0, len(out), 3):
-        weight = strength
-        if mask is not None:
-            weight *= mask[i // 3] / 255.0
+    weights = [strength * (value / 255.0) for value in mask]
+    for pixel, weight in enumerate(weights):
         if weight <= 0.0:
             continue
+        offset = pixel * 3
         for channel in range(3):
-            a = out[i + channel]
-            b = target[i + channel]
-            out[i + channel] = int(a + (b - a) * weight) & 0xFF
+            a = out[offset + channel]
+            out[offset + channel] = (a + int((target[offset + channel] - a) * weight)) & 0xFF
     return out

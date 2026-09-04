@@ -25,5 +25,11 @@ dev = [
     "ruff"
 ]
 
+[project.scripts]
+zimage-studio = "zimage_studio.client.__main__:main"
+zimage-studio-server = "zimage_studio.server.__main__:main"
+
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["zimage*", "config*", "utils*", "tools*"]
+exclude = ["tests*", "docs*", "ckpts*", "assets*"]

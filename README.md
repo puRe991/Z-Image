@@ -225,6 +225,39 @@ image.save("example.png")
 
 </details>
 
+## 🖥️ Z-Image Studio — desktop app for image-to-image editing
+
+A ready-to-run editing application ships with this repository: a GUI with a mask
+brush and a prompt box for **image-to-image** and **inpainting**, plus the
+backend that runs the weights.
+
+```bash
+# Backend, on a 64-bit machine with a GPU (loads the weights on first use)
+python -m zimage_studio.server --host 0.0.0.0 --port 8787
+
+# Client, on any desktop - point it at the backend
+python -m zimage_studio.client --server http://192.168.1.20:8787
+```
+
+No GPU at hand? `python -m zimage_studio.client --demo` starts a procedural demo
+backend inside the client so the whole interface can be tried out.
+
+**Features**: image-to-image with a strength slider, inpainting with a brush /
+eraser / feathered mask, prompt and negative prompt, steps, guidance and seed
+control, batches of up to four images, live progress with cancel, before/after
+compare, result history you can iterate on, German and English UI, dark and
+light theme.
+
+**Why is it split in two?** The interface is deliberately dependency-free
+(standard library plus Tkinter, with a pure-Python PNG codec and mask
+rasteriser), so it also runs on a **32-bit Windows** Python, where PyTorch
+publishes no wheels and a process cannot address the ~12 GB the weights need.
+The model therefore runs in the backend - on the same 64-bit machine, another PC
+on the network, or a rented GPU box.
+
+See [`docs/WINDOWS32.md`](docs/WINDOWS32.md) for the full setup, packaging into a
+32-bit `ZImageStudio.exe`, keyboard shortcuts and troubleshooting (German).
+
 ## 🔬 Decoupled-DMD: The Acceleration Magic Behind Z-Image
 
 [![arXiv](https://img.shields.io/badge/arXiv-2511.22677-b31b1b.svg)](https://arxiv.org/abs/2511.22677)
