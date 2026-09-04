@@ -23,7 +23,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from ...protocol import MODE_IMG2IMG, MODE_INPAINT, MODE_TXT2IMG, GenerateRequest, ServerInfo, decode_image
+from ...protocol import MODE_IMG2IMG, MODE_INPAINT, GenerateRequest, ServerInfo, decode_image
 from ...version import __version__
 from ..convert import HAVE_PILLOW, to_png
 from .base import Engine, EngineError, GenerationContext
@@ -156,12 +156,15 @@ class ZImageEngine(Engine):
     # -- generation --------------------------------------------------------
 
     def generate(self, request: GenerateRequest, ctx: GenerationContext) -> Tuple[List[bytes], int]:
+        # prepare() puts the reference implementation on sys.path, so it has to
+        # run before zimage can be imported.
+        self.prepare()
+
         import torch
         from PIL import Image, ImageFilter
 
         from zimage import generate as zimage_generate
 
-        self.prepare()
         components = self.components
         vae = components["vae"]
         device = self.device

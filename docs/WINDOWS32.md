@@ -4,6 +4,8 @@ Diese Anleitung beschreibt die mitgelieferte Bild-zu-Bild-Anwendung: eine
 Desktop-Oberfläche mit Pinsel-Maske und Prompt-Eingabe, die auch auf einem
 32-Bit-Windows läuft, plus den Server, der die Z-Image-Gewichte rechnet.
 
+![Z-Image Studio: Quellbild mit gemalter Maske, Prompt-Feld und Reglern](images/zimage-studio.png)
+
 ---
 
 ## 1. Warum zwei Programme?

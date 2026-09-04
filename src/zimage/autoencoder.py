@@ -311,10 +311,13 @@ class DiagonalGaussianDistribution:
         self.std = torch.exp(0.5 * self.logvar)
 
     def sample(self, generator: Optional[torch.Generator] = None) -> torch.FloatTensor:
+        # A generator is bound to one device, so sample on the generator's device
+        # and move the noise afterwards.
+        noise_device = self.mean.device if generator is None else generator.device
         noise = torch.randn(
             self.mean.shape,
             generator=generator,
-            device=self.mean.device if generator is None or generator.device.type == self.mean.device.type else "cpu",
+            device=noise_device,
             dtype=self.mean.dtype,
         ).to(self.mean.device)
         return self.mean + self.std * noise

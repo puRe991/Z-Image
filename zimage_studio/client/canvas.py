@@ -185,6 +185,7 @@ class ImageCanvas(ttk.Frame):
         self.preview_size = sniff_size(png)
         self.preview_png = png
         self.showing_preview = True
+        self._hide_cursor()
         self._render()
 
     def clear_preview(self) -> None:
@@ -272,7 +273,9 @@ class ImageCanvas(ttk.Frame):
             return
         width, height = self._displayed_size()
         best = 0
-        for index, (num, den) in enumerate(ZOOM_STEPS):
+        # Never scale beyond 1:1 - blowing a small image up to fill the window is
+        # not what "fit" means in an image editor.
+        for index, (num, den) in enumerate(ZOOM_STEPS[: IDENTITY_ZOOM + 1]):
             if width * num / den <= view_width and height * num / den <= view_height:
                 best = index
         self._set_zoom(best)

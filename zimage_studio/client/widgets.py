@@ -196,8 +196,8 @@ class HistoryStrip(ttk.Frame):
         )
         self.scroll = ttk.Scrollbar(self, orient="horizontal", command=self.canvas.xview)
         self.canvas.configure(xscrollcommand=self.scroll.set)
-        self.canvas.pack(fill="x", padx=8)
-        self.scroll.pack(fill="x", padx=8, pady=(0, 6))
+        self.canvas.pack(fill="x", padx=8, pady=(0, 6))
+        self._scroll_visible = False
 
         self.empty_text = empty_text
         self._empty_item = self.canvas.create_text(
@@ -247,8 +247,8 @@ class HistoryStrip(ttk.Frame):
             self.canvas.create_rectangle(
                 x - 3,
                 5,
-                x + self.THUMB + 3,
-                self.THUMB + 11,
+                x + photo.width() + 3,
+                photo.height() + 11,
                 outline=border,
                 width=2,
                 tags=("thumb", "item-%d" % index),
@@ -256,6 +256,19 @@ class HistoryStrip(ttk.Frame):
             self.canvas.create_image(x, 8, anchor="nw", image=photo, tags=("thumb", "item-%d" % index))
         width = 16 + len(self._photos) * (self.THUMB + 10)
         self.canvas.configure(scrollregion=(0, 0, max(width, 1), self.THUMB + 16))
+        self._sync_scrollbar(width)
+
+    def _sync_scrollbar(self, content_width: int) -> None:
+        """Only show the scrollbar once the thumbnails actually overflow."""
+        needed = content_width > max(1, self.canvas.winfo_width())
+        if needed and not self._scroll_visible:
+            self.canvas.pack_configure(pady=(0, 0))
+            self.scroll.pack(fill="x", padx=8, pady=(0, 6))
+            self._scroll_visible = True
+        elif not needed and self._scroll_visible:
+            self.scroll.pack_forget()
+            self.canvas.pack_configure(pady=(0, 6))
+            self._scroll_visible = False
 
     def _index_at(self, event) -> int:
         x = self.canvas.canvasx(event.x)

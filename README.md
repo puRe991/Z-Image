@@ -255,6 +255,8 @@ publishes no wheels and a process cannot address the ~12 GB the weights need.
 The model therefore runs in the backend - on the same 64-bit machine, another PC
 on the network, or a rented GPU box.
 
+![Z-Image Studio](docs/images/zimage-studio.png)
+
 See [`docs/WINDOWS32.md`](docs/WINDOWS32.md) for the full setup, packaging into a
 32-bit `ZImageStudio.exe`, keyboard shortcuts and troubleshooting (German).
 

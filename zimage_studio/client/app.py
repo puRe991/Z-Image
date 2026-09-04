@@ -211,6 +211,25 @@ class StudioApp:
         self.server_label = ttk.Label(self.toolbar, style="Status.TLabel")
         self.server_label.pack(side="right")
 
+        # -- status bar and history first: pack() hands out space in call order,
+        #    and the paned window below expands into whatever is left.
+        status_bar = ttk.Frame(self.root, style="Toolbar.TFrame", padding=(8, 4))
+        status_bar.pack(side="bottom", fill="x")
+        self.status_label = ttk.Label(status_bar, style="Status.TLabel")
+        self.status_label.pack(side="left")
+        self.progress = ttk.Progressbar(status_bar, mode="determinate", maximum=1000, length=220)
+        self.progress.pack(side="right")
+
+        self.history = HistoryStrip(
+            self.root,
+            colors,
+            "",
+            "",
+            on_select=self._on_history_select,
+            on_activate=lambda index: self.use_result_as_source(index),
+        )
+        self.history.pack(side="bottom", fill="x")
+
         # -- main split
         self.paned = ttk.PanedWindow(self.root, orient="horizontal")
         self.paned.pack(side="top", fill="both", expand=True)
@@ -227,26 +246,19 @@ class StudioApp:
         self.paned.add(right, weight=0)
         self._build_panel(right)
 
-        # -- history + status
-        self.history = HistoryStrip(
-            self.root,
-            colors,
-            "",
-            "",
-            on_select=self._on_history_select,
-            on_activate=lambda index: self.use_result_as_source(index),
-        )
-        self.history.pack(side="top", fill="x")
-
-        status_bar = ttk.Frame(self.root, style="Toolbar.TFrame", padding=(8, 4))
-        status_bar.pack(side="bottom", fill="x")
-        self.status_label = ttk.Label(status_bar, style="Status.TLabel")
-        self.status_label.pack(side="left")
-        self.progress = ttk.Progressbar(status_bar, mode="determinate", maximum=1000, length=220)
-        self.progress.pack(side="right")
 
     def _build_panel(self, parent) -> None:
         colors = self.colors
+        # The action buttons must never scroll out of reach, so they are packed
+        # against the bottom of the panel before the scrollable settings area.
+        actions = ttk.Frame(parent, style="Panel.TFrame", padding=(10, 8))
+        actions.pack(side="bottom", fill="x")
+        self.btn_generate = ttk.Button(actions, style="Accent.TButton", command=self.generate)
+        self.btn_generate.pack(fill="x")
+        self.btn_cancel = ttk.Button(actions, style="Tool.TButton", command=self.cancel, state="disabled")
+        self.btn_cancel.pack(fill="x", pady=(6, 0))
+        ttk.Separator(parent, orient="horizontal").pack(side="bottom", fill="x")
+
         outer = tk.Canvas(parent, background=colors["panel"], highlightthickness=0)
         scroll = ttk.Scrollbar(parent, orient="vertical", command=outer.yview)
         panel = ttk.Frame(outer, style="Panel.TFrame", padding=10)
@@ -350,13 +362,6 @@ class StudioApp:
         self.keep_check = ttk.Checkbutton(self.inpaint_frame, variable=self.keep_var)
         self.keep_check.pack(anchor="w")
 
-        # actions
-        actions = ttk.Frame(panel, style="Panel.TFrame")
-        actions.pack(fill="x", pady=(16, 8))
-        self.btn_generate = ttk.Button(actions, style="Accent.TButton", command=self.generate)
-        self.btn_generate.pack(fill="x")
-        self.btn_cancel = ttk.Button(actions, style="Tool.TButton", command=self.cancel, state="disabled")
-        self.btn_cancel.pack(fill="x", pady=(6, 0))
 
     def _bind_keys(self) -> None:
         root = self.root

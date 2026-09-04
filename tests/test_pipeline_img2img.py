@@ -215,3 +215,66 @@ def test_source_is_broadcast_over_multiple_images():
     source = _latents(7)
     latents, _ = _run(init_latents=source, strength=0.4, num_images_per_prompt=3)
     assert latents.shape[0] == 3
+
+
+# ----------------------------------------------------------------------
+# VAE encode (added for image-to-image)
+# ----------------------------------------------------------------------
+
+
+def _tiny_vae():
+    from zimage.autoencoder import AutoencoderKL
+
+    return AutoencoderKL(
+        in_channels=3,
+        out_channels=3,
+        block_out_channels=(8, 8, 8, 8),  # three downsamples -> /8
+        layers_per_block=1,
+        latent_channels=4,
+        norm_num_groups=4,
+        scaling_factor=0.5,
+        shift_factor=0.25,
+    )
+
+
+def test_vae_encode_returns_a_latent_distribution():
+    vae = _tiny_vae().eval()
+    image = torch.zeros(1, 3, 32, 32)
+    with torch.no_grad():
+        posterior = vae.encode(image).latent_dist
+    assert posterior.mode().shape == (1, 4, 4, 4)
+    assert posterior.std.shape == posterior.mean.shape
+    assert torch.equal(posterior.mode(), posterior.mean)
+
+
+def test_vae_encode_sampling_is_reproducible():
+    vae = _tiny_vae().eval()
+    image = torch.rand(1, 3, 32, 32) * 2 - 1
+    with torch.no_grad():
+        posterior = vae.encode(image).latent_dist
+        first = posterior.sample(torch.Generator().manual_seed(5))
+        second = posterior.sample(torch.Generator().manual_seed(5))
+        third = posterior.sample(torch.Generator().manual_seed(6))
+    assert torch.allclose(first, second)
+    assert not torch.allclose(first, third)
+
+
+def test_vae_encode_decode_shapes_line_up():
+    """Latents produced by encode() must be decodable back to the input size."""
+    vae = _tiny_vae().eval()
+    image = torch.zeros(1, 3, 64, 64)
+    with torch.no_grad():
+        latents = vae.encode(image).latent_dist.mode()
+        decoded = vae.decode(latents, return_dict=False)[0]
+    assert decoded.shape == image.shape
+
+
+def test_scaled_latents_round_trip_through_the_pipeline_convention():
+    """The engine scales latents the way the pipeline unscales them."""
+    vae = _tiny_vae().eval()
+    with torch.no_grad():
+        raw = vae.encode(torch.zeros(1, 3, 32, 32)).latent_dist.mode()
+    shift = vae.config.shift_factor
+    scaled = (raw - shift) * vae.config.scaling_factor          # engine side
+    unscaled = (scaled / vae.config.scaling_factor) + shift      # pipeline side
+    assert torch.allclose(raw, unscaled, atol=1e-6)
