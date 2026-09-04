@@ -301,6 +301,33 @@ class Decoder(nn.Module):
         return x
 
 
+class DiagonalGaussianDistribution:
+    """The Gaussian an encoder predicts; mirrors the diffusers API surface."""
+
+    def __init__(self, parameters: torch.Tensor):
+        self.parameters = parameters
+        self.mean, self.logvar = torch.chunk(parameters, 2, dim=1)
+        self.logvar = torch.clamp(self.logvar, -30.0, 20.0)
+        self.std = torch.exp(0.5 * self.logvar)
+
+    def sample(self, generator: Optional[torch.Generator] = None) -> torch.FloatTensor:
+        noise = torch.randn(
+            self.mean.shape,
+            generator=generator,
+            device=self.mean.device if generator is None or generator.device.type == self.mean.device.type else "cpu",
+            dtype=self.mean.dtype,
+        ).to(self.mean.device)
+        return self.mean + self.std * noise
+
+    def mode(self) -> torch.FloatTensor:
+        return self.mean
+
+
+@dataclass
+class AutoencoderEncoderOutput:
+    latent_dist: DiagonalGaussianDistribution
+
+
 class AutoencoderKL(nn.Module):
     def __init__(
         self,
@@ -356,6 +383,20 @@ class AutoencoderKL(nn.Module):
     @property
     def dtype(self):
         return next(self.parameters()).dtype
+
+    def encode(self, x: torch.FloatTensor, return_dict: bool = True):
+        """Encode pixels into the latent distribution (needed for image-to-image)."""
+        h = self.encoder(x)
+
+        if self.quant_conv is not None:
+            h = self.quant_conv(h)
+
+        posterior = DiagonalGaussianDistribution(h)
+
+        if not return_dict:
+            return (posterior,)
+
+        return AutoencoderEncoderOutput(latent_dist=posterior)
 
     def decode(self, z: torch.FloatTensor, return_dict: bool = True) -> AutoencoderKLOutput:
         if self.post_quant_conv is not None:

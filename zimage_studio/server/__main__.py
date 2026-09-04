@@ -26,7 +26,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default="auto", help="auto | cuda | mps | cpu")
     parser.add_argument("--dtype", default="bfloat16", help="bfloat16 | float16 | float32")
     parser.add_argument("--attention", default="", help="override the Z-Image attention backend")
-    parser.add_argument("--offload", action="store_true", help="move modules to CPU between stages")
     parser.add_argument("--no-download", action="store_true", help="fail instead of fetching missing weights")
     parser.add_argument("--preload", action="store_true", help="load the weights at start-up, not on first job")
     parser.add_argument("--token", default="", help="require this value in the X-Auth-Token header")
@@ -51,7 +50,6 @@ def main(argv=None) -> int:
             "device": args.device,
             "dtype": args.dtype,
             "attention_backend": args.attention or None,
-            "offload": args.offload,
             "allow_download": not args.no_download,
             "preload": args.preload,
         }

@@ -1,7 +1,7 @@
 """Z-Image Pipeline."""
 
 import inspect
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, Union
 
 from loguru import logger
 import torch
@@ -82,7 +82,22 @@ def generate(
     cfg_truncation: float = DEFAULT_CFG_TRUNCATION,
     max_sequence_length: int = DEFAULT_MAX_SEQUENCE_LENGTH,
     output_type: str = "pil",
+    init_latents: Optional[torch.Tensor] = None,
+    strength: float = 1.0,
+    mask_latents: Optional[torch.Tensor] = None,
+    callback: Optional[Callable[[int, int], None]] = None,
 ):
+    """Sample an image.
+
+    Passing ``init_latents`` (already scaled latents of a source image) turns the
+    call into image-to-image: the denoising loop starts at the sigma implied by
+    ``strength`` instead of at pure noise.  Adding ``mask_latents`` (1 = repaint,
+    0 = keep, broadcastable to the latent grid) additionally re-anchors the kept
+    region on the source after every step, which is inpainting.
+
+    ``callback(step, total)`` is invoked once per denoising step; raising from it
+    aborts the run, which is how the server implements cancellation.
+    """
     device = next(transformer.parameters()).device
 
     if hasattr(vae, "config") and hasattr(vae.config, "block_out_channels"):
@@ -186,7 +201,8 @@ def generate(
     width_latent = 2 * (int(width) // vae_scale)
     shape = (batch_size * num_images_per_prompt, transformer.in_channels, height_latent, width_latent)
 
-    latents = torch.randn(shape, generator=generator, device=device, dtype=torch.float32)
+    noise = torch.randn(shape, generator=generator, device=device, dtype=torch.float32)
+    latents = noise
 
     actual_batch_size = batch_size * num_images_per_prompt
     image_seq_len = (latents.shape[2] // 2) * (latents.shape[3] // 2)
@@ -207,6 +223,47 @@ def generate(
         sigmas=None,
         **scheduler_kwargs,
     )
+
+    # Image-to-image / inpainting: start partway down the sigma schedule on top of
+    # the source latents instead of on pure noise.
+    if init_latents is not None:
+        init_latents = init_latents.to(device=device, dtype=torch.float32)
+        if init_latents.shape[0] == 1 and actual_batch_size > 1:
+            init_latents = init_latents.expand(actual_batch_size, -1, -1, -1)
+        if init_latents.shape != latents.shape:
+            raise ValueError(
+                f"init_latents shape {tuple(init_latents.shape)} does not match "
+                f"the expected latent shape {tuple(latents.shape)}."
+            )
+
+        strength = float(min(max(strength, 0.0), 1.0))
+        start_index = int(round(num_inference_steps * (1.0 - strength)))
+        start_index = max(0, min(num_inference_steps - 1, start_index))
+
+        sigma_start = scheduler.sigmas[start_index].to(device=device, dtype=torch.float32)
+        latents = (1.0 - sigma_start) * init_latents + sigma_start * noise
+
+        timesteps = timesteps[start_index:]
+        scheduler._begin_index = start_index
+        num_inference_steps = len(timesteps)
+        logger.info(f"Image-to-image: strength={strength:.2f}, starting at step {start_index}")
+
+    if mask_latents is not None:
+        if init_latents is None:
+            raise ValueError("mask_latents requires init_latents (inpainting needs a source image).")
+        mask_latents = mask_latents.to(device=device, dtype=torch.float32)
+        mask_latents = mask_latents.clamp(0.0, 1.0)
+        if mask_latents.shape[-2:] != latents.shape[-2:]:
+            raise ValueError(
+                f"mask_latents grid {tuple(mask_latents.shape[-2:])} does not match "
+                f"the latent grid {tuple(latents.shape[-2:])}."
+            )
+        # Outside the mask the very first latents must be the source as well.
+        latents = mask_latents * latents + (1.0 - mask_latents) * (
+            (1.0 - scheduler.sigmas[scheduler._begin_index or 0].to(device=device, dtype=torch.float32))
+            * init_latents
+            + scheduler.sigmas[scheduler._begin_index or 0].to(device=device, dtype=torch.float32) * noise
+        )
 
     logger.info(f"Sampling loop start: {num_inference_steps} steps")
 
@@ -274,6 +331,16 @@ def generate(
         noise_pred = -noise_pred.squeeze(2)
         latents = scheduler.step(noise_pred.to(torch.float32), t, latents, return_dict=False)[0]
         assert latents.dtype == torch.float32
+
+        if mask_latents is not None:
+            # Re-anchor everything outside the mask on the source image, noised to
+            # the sigma the sampler has just arrived at.
+            sigma_next = scheduler.sigmas[scheduler._step_index].to(device=device, dtype=torch.float32)
+            source_at_sigma = (1.0 - sigma_next) * init_latents + sigma_next * noise
+            latents = mask_latents * latents + (1.0 - mask_latents) * source_at_sigma
+
+        if callback is not None:
+            callback(i + 1, num_inference_steps)
 
     if output_type == "latent":
         return latents

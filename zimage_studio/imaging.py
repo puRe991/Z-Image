@@ -299,19 +299,33 @@ def _disc_spans(radius: int) -> List[Tuple[int, int]]:
 _SPAN_CACHE: Dict[int, List[Tuple[int, int]]] = {}
 
 
-def rasterize_strokes(width: int, height: int, strokes: Iterable[Stroke]) -> bytes:
-    """Render brush strokes into an 8-bit mask (255 = edit, 0 = keep)."""
+def new_mask(width: int, height: int) -> bytearray:
+    """An all-zero (nothing selected) mask buffer."""
     if width <= 0 or height <= 0:
         raise ImageError("mask size must be positive")
-    mask = bytearray(width * height)
+    return bytearray(width * height)
+
+
+def stamp_stroke(mask: bytearray, width: int, height: int, stroke: Stroke) -> None:
+    """Paint (or erase) one stroke into an existing mask buffer, in place.
+
+    Stamping incrementally is what keeps mask painting interactive: the cost is
+    proportional to the brushed area, not to the size of the image.
+    """
+    radius = max(1, int(round(float(stroke.get("radius", 16)))))
+    value = 0 if stroke.get("erase") else 255
+    spans = _SPAN_CACHE.get(radius)
+    if spans is None:
+        spans = _SPAN_CACHE[radius] = _disc_spans(radius)
+    for x, y in _densify(stroke.get("points") or [], radius):
+        _stamp(mask, width, height, int(round(x)), int(round(y)), radius, spans, value)
+
+
+def rasterize_strokes(width: int, height: int, strokes: Iterable[Stroke]) -> bytes:
+    """Render brush strokes into an 8-bit mask (255 = edit, 0 = keep)."""
+    mask = new_mask(width, height)
     for stroke in strokes:
-        radius = max(1, int(round(float(stroke.get("radius", 16)))))
-        value = 0 if stroke.get("erase") else 255
-        spans = _SPAN_CACHE.get(radius)
-        if spans is None:
-            spans = _SPAN_CACHE[radius] = _disc_spans(radius)
-        for x, y in _densify(stroke.get("points") or [], radius):
-            _stamp(mask, width, height, int(round(x)), int(round(y)), radius, spans, value)
+        stamp_stroke(mask, width, height, stroke)
     return bytes(mask)
 
 
@@ -411,3 +425,50 @@ def to_rgb(mode: str, pixels: bytes) -> Tuple[str, bytearray]:
             out[i * 3 : i * 3 + 3] = pixels[i * 4 : i * 4 + 3]
         return MODE_RGB, out
     raise ImageError("unsupported mode %r" % mode)
+
+
+#: Palette used for the translucent mask overlay in the GUI: index 0 is fully
+#: transparent, index 1 is a semi-transparent accent colour.
+OVERLAY_PALETTE = (0, 0, 0, 255, 59, 48)
+OVERLAY_ALPHA = (0, 140)
+
+_MASK_TO_INDEX = bytes(1 if value else 0 for value in range(256))
+
+
+def png_encode_indexed(
+    width: int,
+    height: int,
+    indices: bytes,
+    palette: Sequence[int] = OVERLAY_PALETTE,
+    alpha: Sequence[int] = OVERLAY_ALPHA,
+    *,
+    level: int = 1,
+) -> bytes:
+    """Encode an 8-bit indexed PNG with per-entry alpha.
+
+    The mask overlay is a two colour image, so shipping it as a palette PNG keeps
+    the buffer at one byte per pixel - fast enough to re-encode on every brush
+    stroke, even on a slow 32-bit machine.
+    """
+    if len(indices) != width * height:
+        raise ImageError("expected %d index bytes, got %d" % (width * height, len(indices)))
+    header = struct.pack(">IIBBBBB", width, height, 8, 3, 0, 0, 0)
+    raw = bytearray()
+    view = memoryview(indices)
+    for y in range(height):
+        raw.append(0)
+        raw += view[y * width : (y + 1) * width]
+    chunks = [
+        PNG_MAGIC,
+        _chunk(b"IHDR", header),
+        _chunk(b"PLTE", bytes(palette)),
+        _chunk(b"tRNS", bytes(alpha)),
+        _chunk(b"IDAT", zlib.compress(bytes(raw), level)),
+        _chunk(b"IEND", b""),
+    ]
+    return b"".join(chunks)
+
+
+def mask_to_overlay_png(width: int, height: int, mask: bytes) -> bytes:
+    """Turn an 8-bit mask into the translucent overlay the canvas displays."""
+    return png_encode_indexed(width, height, bytes(mask).translate(_MASK_TO_INDEX))
