@@ -17,6 +17,10 @@ from ..protocol import DEFAULTS
 APP_DIR_NAME = "ZImageStudio"
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
+    # "local" runs the engine in this process (no network at all); "server"
+    # talks to a Z-Image backend over HTTP.
+    "backend": "local",
+    "model_path": "",
     "server_url": "http://127.0.0.1:8787",
     "token": "",
     "language": "de",

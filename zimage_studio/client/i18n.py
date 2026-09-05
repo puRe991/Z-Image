@@ -30,10 +30,13 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "menu.view.compare": "Vorher/Nachher",
         "menu.view.theme": "Design wechseln",
         "menu.view.language": "Sprache: English",
-        "menu.server": "Server",
-        "menu.server.settings": "Verbindung…",
+        "menu.server": "Verarbeitung",
+        "menu.server.local": "Lokal auf diesem PC",
+        "menu.server.settings": "Server verwenden…",
+        "menu.server.model": "KI-Modelldatei wählen…",
         "menu.server.reconnect": "Neu verbinden",
         "menu.server.demo": "Demo-Backend starten",
+        "menu.help.commands": "Befehle des lokalen Modus",
         "menu.help": "Hilfe",
         "menu.help.shortcuts": "Tastenkürzel",
         "menu.help.about": "Über",
@@ -50,6 +53,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "mode.inpaint": "Bereich ersetzen",
         "panel.prompt": "Prompt",
         "panel.prompt.hint": "Beschreibe, wie das Bild aussehen soll…",
+        "panel.prompt.hint.local": "z. B. „entferne das Auto“, „etwas heller“, „schwarzweiß“…",
         "panel.negative": "Negativer Prompt",
         "panel.negative.hint": "Was vermieden werden soll (nur bei Guidance > 1)",
         "panel.strength": "Stärke",
@@ -75,6 +79,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "status.ready": "Bereit",
         "status.no_server": "Nicht verbunden",
         "status.connected": "Verbunden: {engine} auf {device}",
+        "status.local": "Lokal: {model}",
+        "status.local_nomodel": "Lokal – ohne KI-Modell (eingeschränkt)",
+        "status.model_set": "Modell gewählt: {path}",
         "status.connecting": "Verbinde…",
         "status.queued": "In der Warteschlange…",
         "status.running": "Schritt {step}/{total}",
@@ -102,6 +109,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "error.unsupported": (
             "Dieses Format kann ohne Serververbindung nicht gelesen werden.\n"
             "Verbinde dich mit dem Server oder verwende PNG bzw. GIF."
+        ),
+        "error.model_missing": (
+            "Es wurde keine KI-Modelldatei gefunden.\n\n{detail}\n\n"
+            "Ohne Modell bleibt die einfache Flächenfüllung aktiv."
         ),
         "about.text": (
             "{app} {version}\n\n"
@@ -144,10 +155,13 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "menu.view.compare": "Before/after",
         "menu.view.theme": "Switch theme",
         "menu.view.language": "Sprache: Deutsch",
-        "menu.server": "Server",
-        "menu.server.settings": "Connection…",
+        "menu.server": "Processing",
+        "menu.server.local": "Local, on this PC",
+        "menu.server.settings": "Use a server…",
+        "menu.server.model": "Choose AI model file…",
         "menu.server.reconnect": "Reconnect",
         "menu.server.demo": "Start demo backend",
+        "menu.help.commands": "Local mode commands",
         "menu.help": "Help",
         "menu.help.shortcuts": "Keyboard shortcuts",
         "menu.help.about": "About",
@@ -164,6 +178,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "mode.inpaint": "Replace area",
         "panel.prompt": "Prompt",
         "panel.prompt.hint": "Describe what the image should look like…",
+        "panel.prompt.hint.local": "e.g. \"remove the car\", \"a bit brighter\", \"black and white\"…",
         "panel.negative": "Negative prompt",
         "panel.negative.hint": "What to avoid (only used with guidance > 1)",
         "panel.strength": "Strength",
@@ -189,6 +204,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "status.ready": "Ready",
         "status.no_server": "Not connected",
         "status.connected": "Connected: {engine} on {device}",
+        "status.local": "Local: {model}",
+        "status.local_nomodel": "Local - no AI model (limited)",
+        "status.model_set": "Model selected: {path}",
         "status.connecting": "Connecting…",
         "status.queued": "Queued…",
         "status.running": "Step {step}/{total}",
@@ -216,6 +234,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "error.unsupported": (
             "This format cannot be read without a server connection.\n"
             "Connect to the server or use PNG or GIF."
+        ),
+        "error.model_missing": (
+            "No AI model file was found.\n\n{detail}\n\n"
+            "Without it the simple area fill stays active."
         ),
         "about.text": (
             "{app} {version}\n\n"

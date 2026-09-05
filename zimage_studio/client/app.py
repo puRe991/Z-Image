@@ -60,12 +60,14 @@ class StudioApp:
         self.tr = Translator(self.settings.get("language", "de"))
         self.colors = apply_theme(self.root, self.settings.get("theme", "dark"))
 
-        self.client = StudioClient(self.settings.get("server_url"), self.settings.get("token"))
+        self.client = self._make_client()
         self.runner = JobRunner(self.client)
         self.server_info: Optional[ServerInfo] = None
+        self.capabilities: List[str] = [MODE_TXT2IMG, MODE_IMG2IMG, MODE_INPAINT]
         self.last_seed = -1
         self.demo_server = None
         self._job_started = 0.0
+        self._connecting = False
         # Tk may only be touched from the thread that created it, so worker
         # threads hand their callbacks over through this queue instead of
         # calling root.after() themselves.
@@ -139,11 +141,15 @@ class StudioApp:
         self.menu_view.add_command(command=self.toggle_theme)
         self.menu_view.add_command(command=self.toggle_language)
 
+        self.menu_server.add_command(command=self.use_local_backend)
+        self.menu_server.add_command(command=self.choose_model_file)
+        self.menu_server.add_separator()
         self.menu_server.add_command(command=self.open_server_dialog)
         self.menu_server.add_command(command=self.connect)
         self.menu_server.add_separator()
         self.menu_server.add_command(command=self.start_demo_backend)
 
+        self.menu_help.add_command(command=self.show_commands)
         self.menu_help.add_command(command=self.show_shortcuts)
         self.menu_help.add_command(command=self.show_about)
 
@@ -427,11 +433,21 @@ class StudioApp:
             if key:
                 self.menu_view.entryconfigure(index, label=tr(key))
         for index, key in enumerate(
-            ("menu.server.settings", "menu.server.reconnect", None, "menu.server.demo")
+            (
+                "menu.server.local",
+                "menu.server.model",
+                None,
+                "menu.server.settings",
+                "menu.server.reconnect",
+                None,
+                "menu.server.demo",
+            )
         ):
             if key:
                 self.menu_server.entryconfigure(index, label=tr(key))
-        for index, key in enumerate(("menu.help.shortcuts", "menu.help.about")):
+        for index, key in enumerate(
+            ("menu.help.commands", "menu.help.shortcuts", "menu.help.about")
+        ):
             self.menu_help.entryconfigure(index, label=tr(key))
 
         self.btn_open.configure(text=tr("tool.open"))
@@ -446,7 +462,8 @@ class StudioApp:
         for mode, button in self.mode_buttons.items():
             button.configure(text=tr("mode.%s" % mode))
 
-        self.prompt_box.set_title(tr("panel.prompt"), tr("panel.prompt.hint"))
+        hint = "panel.prompt.hint.local" if self.is_local else "panel.prompt.hint"
+        self.prompt_box.set_title(tr("panel.prompt"), tr(hint))
         self.negative_box.set_title(tr("panel.negative"), tr("panel.negative.hint"))
         self.strength_scale.set_text(tr("panel.strength"), tr("panel.strength.hint"))
         self.steps_scale.set_text(tr("panel.steps"))
@@ -473,26 +490,95 @@ class StudioApp:
     # server connection
     # ------------------------------------------------------------------
 
+    @property
+    def is_local(self) -> bool:
+        return self.settings.get("backend", "local") == "local"
+
+    def _make_client(self):
+        """Build the backend the settings ask for."""
+        if self.settings.get("backend", "local") == "local":
+            from .local_backend import LocalClient
+
+            return LocalClient(
+                model_path=self.settings.get("model_path") or None,
+                language=self.settings.get("language", "de"),
+            )
+        return StudioClient(self.settings.get("server_url"), self.settings.get("token"))
+
+    def use_local_backend(self) -> None:
+        """Switch to in-process editing on this machine."""
+        self._close_client()
+        self.settings.set("backend", "local")
+        self.client = self._make_client()
+        self.runner = JobRunner(self.client)
+        self._retranslate()
+        self.connect()
+
+    def choose_model_file(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self.root,
+            title=self.tr("menu.server.model"),
+            filetypes=[("ONNX model", "*.onnx"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        self.settings.set("model_path", path)
+        self.settings.set("backend", "local")
+        self.settings.save()
+        self._close_client()
+        self.client = self._make_client()
+        self.runner = JobRunner(self.client)
+        self.set_status(self.tr("status.model_set", path=path))
+        self.connect()
+
+    def _close_client(self) -> None:
+        closer = getattr(self.client, "close", None)
+        if callable(closer):
+            closer()
+
     def connect(self) -> None:
-        self.client.base_url = (self.settings.get("server_url") or "").rstrip("/")
-        self.client.token = self.settings.get("token") or ""
+        if getattr(self, "_connecting", False):
+            return  # one probe at a time; the result updates the whole bar anyway
+        self._connecting = True
+        if not self.is_local:
+            self.client.base_url = (self.settings.get("server_url") or "").rstrip("/")
+            self.client.token = self.settings.get("token") or ""
         self._set_server_state(None, self.tr("status.connecting"))
 
         def worker() -> None:
             try:
                 info = self.client.info()
             except ClientError as exc:
-                self._later(self._on_connect_failed, str(exc))
+                self._later(self._connect_finished, None, str(exc))
                 return
-            self._later(self._on_connected, info)
+            self._later(self._connect_finished, info, "")
 
         threading.Thread(target=worker, name="zimage-connect", daemon=True).start()
 
+    def _connect_finished(self, info: Optional[ServerInfo], detail: str) -> None:
+        self._connecting = False
+        if info is None:
+            self._on_connect_failed(detail)
+        else:
+            self._on_connected(info)
+
     def _on_connected(self, info: ServerInfo) -> None:
         self.server_info = info
-        self._set_server_state(
-            True, self.tr("status.connected", engine=info.engine, device=info.device or "?")
-        )
+        self.capabilities = list(info.modes or [MODE_TXT2IMG, MODE_IMG2IMG, MODE_INPAINT])
+        if self.is_local:
+            has_model = "LaMa" in (info.model or "")
+            text = (
+                self.tr("status.local", model=info.model)
+                if has_model
+                else self.tr("status.local_nomodel")
+            )
+            self._set_server_state(has_model, text)
+            self.set_status(info.detail or "")
+        else:
+            self._set_server_state(
+                True, self.tr("status.connected", engine=info.engine, device=info.device or "?")
+            )
+        self._update_mode_state()
 
     def _on_connect_failed(self, detail: str) -> None:
         self.server_info = None
@@ -505,17 +591,10 @@ class StudioApp:
         self.server_label.configure(text=text)
 
     def _update_server_label(self) -> None:
-        if self.server_info is not None:
-            self._set_server_state(
-                True,
-                self.tr(
-                    "status.connected",
-                    engine=self.server_info.engine,
-                    device=self.server_info.device or "?",
-                ),
-            )
-        else:
+        if self.server_info is None:
             self._set_server_state(False, self.tr("status.no_server"))
+            return
+        self._on_connected(self.server_info)
 
     def start_demo_backend(self) -> str:
         """Run the GPU-free demo engine in this process and connect to it."""
@@ -533,8 +612,19 @@ class StudioApp:
         host, port = self.demo_server.server_address[:2]
         url = "http://%s:%d" % (host, port)
         self.settings.set("server_url", url)
-        self.connect()
+        self.use_server_backend(url)
         return url
+
+    def use_server_backend(self, url: Optional[str] = None) -> None:
+        """Switch from in-process editing to an HTTP backend."""
+        if url:
+            self.settings.set("server_url", url)
+        self._close_client()
+        self.settings.set("backend", "server")
+        self.client = self._make_client()
+        self.runner = JobRunner(self.client)
+        self._retranslate()
+        self.connect()
 
     def open_server_dialog(self) -> None:
         ServerDialog(self)
@@ -734,11 +824,17 @@ class StudioApp:
     def _update_mode_state(self) -> None:
         mode = self.mode_var.get()
         has_image = self.canvas.has_image
-        self.mode_buttons[MODE_IMG2IMG].configure(state="normal" if has_image else "disabled")
-        self.mode_buttons[MODE_INPAINT].configure(state="normal" if has_image else "disabled")
-        if not has_image and mode != MODE_TXT2IMG:
-            self.mode_var.set(MODE_TXT2IMG)
-            mode = MODE_TXT2IMG
+        supported = set(self.capabilities)
+        for name, button in self.mode_buttons.items():
+            allowed = name in supported and (has_image or name == MODE_TXT2IMG)
+            button.configure(state="normal" if allowed else "disabled")
+        if mode not in supported or (not has_image and mode != MODE_TXT2IMG):
+            # Fall back to the first mode this backend can actually run.
+            for candidate in (MODE_IMG2IMG, MODE_INPAINT, MODE_TXT2IMG):
+                if candidate in supported and (has_image or candidate == MODE_TXT2IMG):
+                    self.mode_var.set(candidate)
+                    mode = candidate
+                    break
 
         image_mode = mode in (MODE_IMG2IMG, MODE_INPAINT)
         state = "normal" if image_mode else "disabled"
@@ -881,6 +977,16 @@ class StudioApp:
     # dialogs, misc
     # ------------------------------------------------------------------
 
+    def show_commands(self) -> None:
+        """The instruction vocabulary understood by the local engine."""
+        from ..localedit.commands import describe_vocabulary
+
+        messagebox.showinfo(
+            self.tr("menu.help.commands"),
+            describe_vocabulary(self.tr.language),
+            parent=self.root,
+        )
+
     def show_about(self) -> None:
         messagebox.showinfo(
             self.tr("menu.help.about"),
@@ -957,6 +1063,7 @@ class StudioApp:
 
     def quit(self) -> None:
         self._store_settings()
+        self._close_client()
         if self._event_job is not None:
             try:
                 self.root.after_cancel(self._event_job)
@@ -1038,5 +1145,6 @@ class ServerDialog(tk.Toplevel):
         self.app.settings.set("server_url", self.url_var.get().strip())
         self.app.settings.set("token", self.token_var.get().strip())
         self.app.settings.save()
-        self.app.connect()
+        # Entering a server address means the user wants that server used.
+        self.app.use_server_backend()
         self.destroy()

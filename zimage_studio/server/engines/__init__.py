@@ -9,6 +9,7 @@ from .base import Cancelled, Engine, EngineError, GenerationContext
 #: Name -> import path of the engine class.  The Z-Image engine is imported
 #: lazily so that the demo engine still works on a machine without PyTorch.
 _ENGINES = {
+    "local": ("zimage_studio.server.engines.local", "LocalEngine"),
     "mock": ("zimage_studio.server.engines.mock", "MockEngine"),
     "zimage": ("zimage_studio.server.engines.zimage_local", "ZImageEngine"),
 }

@@ -7,6 +7,7 @@ job, receive the result and put it into the history.
 
 from __future__ import annotations
 
+import gc
 import pathlib
 import tempfile
 import time
@@ -43,6 +44,10 @@ def app(tmp_path):
             root.destroy()
         except tk.TclError:
             pass
+        # Several Tk roots per process confuse tkinter's global default root and
+        # leave objects to be collected later; clear both between tests.
+        tk._default_root = None
+        gc.collect()
 
 
 def _pump(app, seconds: float) -> None:
@@ -310,3 +315,94 @@ def test_settings_survive_a_restart(app, tmp_path):
     reloaded = Settings(app.settings.path)
     assert reloaded.get("prompt") == "persisted prompt"
     assert reloaded.get("steps") == 11
+
+
+# ----------------------------------------------------------------------
+# local, in-process editing (the mode a machine without a backend uses)
+# ----------------------------------------------------------------------
+
+
+@pytest.fixture()
+def local_app(tmp_path):
+    """The main window wired to the in-process engine, no server involved."""
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip("no X display available: %s" % exc)
+    root.withdraw()
+
+    from zimage_studio.client.app import StudioApp
+
+    settings = Settings(tmp_path / "settings.json")
+    settings.set("backend", "local")
+    settings.set("model_path", "")  # no neural model: classical fill
+    instance = StudioApp(root=root, settings=settings)
+    _pump(instance, 0.3)
+    try:
+        yield instance
+    finally:
+        instance.quit()
+        try:
+            root.destroy()
+        except tk.TclError:
+            pass
+        # Several Tk roots per process confuse tkinter's global default root and
+        # leave objects to be collected later; clear both between tests.
+        tk._default_root = None
+        gc.collect()
+
+
+def test_local_backend_connects_without_a_server(local_app):
+    assert _wait_for(local_app, lambda: local_app.server_info is not None, timeout=90), (
+        local_app.status_label.cget("text")
+    )
+    assert local_app.server_info.engine == "local"
+    assert local_app.client.base_url == "local://"
+
+
+def test_local_backend_disables_text_to_image(local_app):
+    assert _wait_for(local_app, lambda: local_app.server_info is not None, timeout=90)
+    assert p.MODE_TXT2IMG not in local_app.capabilities
+    assert str(local_app.mode_buttons[p.MODE_TXT2IMG].cget("state")) == "disabled"
+
+
+def test_local_removal_runs_end_to_end(local_app, tmp_path):
+    assert _wait_for(local_app, lambda: local_app.server_info is not None, timeout=90)
+    path = tmp_path / "scene.png"
+    path.write_bytes(im.solid_png(160, 120, (70, 120, 180)))
+    assert local_app.open_image(str(path))
+
+    _paint(local_app, [(70, 55), (90, 65)])
+    local_app.prompt_box.set("entferne das")
+    assert local_app.generate()
+    assert _wait_for(local_app, lambda: len(local_app.history) == 1, timeout=120)
+    assert local_app.canvas.preview_png is not None
+    assert str(local_app.btn_generate.cget("state")) == "normal"
+
+
+def test_local_adjustment_from_a_written_instruction(local_app, tmp_path):
+    assert _wait_for(local_app, lambda: local_app.server_info is not None, timeout=90)
+    path = tmp_path / "flat.png"
+    path.write_bytes(im.solid_png(120, 90, (100, 100, 100)))
+    local_app.open_image(str(path))
+    local_app.mode_var.set(p.MODE_IMG2IMG)
+    local_app.prompt_box.set("viel heller")
+    assert local_app.generate()
+    assert _wait_for(local_app, lambda: len(local_app.history) == 1, timeout=120)
+
+    _w, _h, _mode, pixels = im.png_decode(local_app.canvas.preview_png)
+    assert pixels[0] > 100
+
+
+def test_unknown_instruction_is_reported_in_the_status_bar(local_app, tmp_path):
+    assert _wait_for(local_app, lambda: local_app.server_info is not None, timeout=90)
+    path = tmp_path / "flat.png"
+    path.write_bytes(im.solid_png(80, 60, (10, 20, 30)))
+    local_app.open_image(str(path))
+    local_app.mode_var.set(p.MODE_IMG2IMG)
+    local_app.prompt_box.set("a photorealistic castle in the clouds")
+    local_app.generate()
+    assert _wait_for(
+        local_app, lambda: "kenne" in local_app.status_label.cget("text"), timeout=120
+    )
+    assert len(local_app.history) == 0
