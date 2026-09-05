@@ -57,11 +57,14 @@ def _decode(png):
 # ----------------------------------------------------------------------
 
 
-def test_info_without_a_model_is_honest_about_it():
-    engine = create_engine("local", model_path="/nonexistent/model.onnx")
+def test_info_without_any_model_is_honest_about_it():
+    engine = create_engine(
+        "local", model_path="/nonexistent/model.onnx", segment_model_path="/nonexistent/seg.onnx"
+    )
     info = engine.info()
-    assert info.ready
+    assert info.ready  # the classical operations still work
     assert "no neural model" in info.model
+    assert "not found" in info.detail
     assert p.MODE_TXT2IMG not in info.modes
 
 
@@ -79,7 +82,9 @@ def test_info_with_a_model_reports_the_network():
 
 
 def test_removal_falls_back_to_content_aware_fill_without_a_model():
-    engine = create_engine("local", model_path="/nonexistent/model.onnx")
+    engine = create_engine(
+        "local", model_path="/nonexistent/model.onnx", segment_model_path="/nonexistent/seg.onnx"
+    )
     images, seed = engine.generate(_request(prompt="entferne das"), GenerationContext())
     assert len(images) == 1 and seed >= 0
     width, height, _mode, pixels = _decode(images[0])
@@ -212,3 +217,75 @@ def test_engine_errors_reach_the_client_as_a_failed_job():
         assert "EngineError" in status.error
     finally:
         client.close()
+
+
+# ----------------------------------------------------------------------
+# subject detection
+# ----------------------------------------------------------------------
+
+SEGMENT_MODEL = pathlib.Path(__file__).resolve().parents[1] / "models" / "u2netp.onnx"
+needs_segment_model = pytest.mark.skipif(
+    not SEGMENT_MODEL.is_file(), reason="subject-detection model not present"
+)
+
+
+def _subject_image(width=128, height=128):
+    """A plain background with one obvious object in the middle."""
+    pixels = bytearray(width * height * 3)
+    for y in range(height):
+        for x in range(width):
+            index = (y * width + x) * 3
+            inside = (x - width // 2) ** 2 + (y - height // 2) ** 2 < (width // 4) ** 2
+            pixels[index : index + 3] = bytes((230, 40, 40) if inside else (150, 190, 220))
+    return im.png_encode(width, height, bytes(pixels), im.MODE_RGB)
+
+
+def test_subject_operations_need_the_model():
+    engine = create_engine("local", model_path=None, segment_model_path="/nonexistent.onnx")
+    request = p.parse_generate_request(
+        {"mode": p.MODE_IMG2IMG, "prompt": "freistellen", "image": p.encode_image(_subject_image())}
+    )
+    with pytest.raises(EngineError, match="u2netp"):
+        engine.generate(request, GenerationContext())
+
+
+@needs_segment_model
+def test_cutout_returns_an_image_with_transparency():
+    engine = create_engine("local", model_path=None, segment_model_path=str(SEGMENT_MODEL))
+    request = p.parse_generate_request(
+        {"mode": p.MODE_IMG2IMG, "prompt": "freistellen", "image": p.encode_image(_subject_image())}
+    )
+    images, _seed = engine.generate(request, GenerationContext())
+    width, height, mode, pixels = im.png_decode(images[0])
+    assert mode == im.MODE_RGBA
+    centre = (height // 2 * width + width // 2) * 4
+    assert pixels[centre + 3] > 200  # the subject is opaque
+    assert pixels[3] < 60  # the corner is transparent
+
+
+@needs_segment_model
+def test_background_colour_replaces_only_the_background():
+    engine = create_engine("local", model_path=None, segment_model_path=str(SEGMENT_MODEL))
+    request = p.parse_generate_request(
+        {
+            "mode": p.MODE_IMG2IMG,
+            "prompt": "hintergrund schwarz",
+            "image": p.encode_image(_subject_image()),
+        }
+    )
+    images, _seed = engine.generate(request, GenerationContext())
+    width, height, mode, pixels = im.png_decode(images[0])
+    assert mode == im.MODE_RGB
+    corner = pixels[0:3]
+    centre_index = (height // 2 * width + width // 2) * 3
+    assert list(corner) == [0, 0, 0]
+    assert pixels[centre_index] > 150  # the subject kept its colour
+
+
+@needs_segment_model
+def test_info_lists_both_networks():
+    engine = create_engine(
+        "local", model_path=str(MODEL) if MODEL.is_file() else None, segment_model_path=str(SEGMENT_MODEL)
+    )
+    info = engine.info()
+    assert "U^2-Net" in info.model

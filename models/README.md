@@ -28,3 +28,17 @@ environment variable `ZIMAGE_LAMA_MODEL` at it.
 Without the file the application still runs; object removal then uses the
 dependency-free content-aware fill instead, which is smoother and less
 convincing on textured backgrounds.
+
+## u2netp.onnx
+
+|  |  |
+|---|---|
+| **What** | U²-Net (small variant) - salient object detection, used for "cut out" and the background operations |
+| **Size** | 4.5 MB, 1.1 million parameters, fixed 320×320 input |
+| **Source** | https://github.com/danielgatis/rembg/releases → `u2netp.onnx` |
+| **Upstream** | https://github.com/xuebinqin/U-2-Net |
+| **License** | Apache-2.0 |
+| **SHA-256** | `309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8` |
+
+Found automatically in this directory, or pointed at with the environment
+variable `ZIMAGE_U2NET_MODEL`.

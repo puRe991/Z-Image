@@ -31,10 +31,31 @@ PYTHON_TAGS = ("38", "39", "310", "311")
 #: picks whatever is newest for each interpreter.
 OPTIONAL_PACKAGES = ("pillow",)
 
-MODEL_NAME = "lama_fp32.onnx"
-MODEL_URL = "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx"
-MODEL_SHA256 = "1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6"
-MODEL_LICENSE = "Apache-2.0 (LaMa, Samsung AI Center; ONNX export by Carve)"
+#: The neural networks the local mode can use.  Both are permissively licensed
+#: and small enough for a 32-bit process.
+MODELS = (
+    {
+        "name": "lama_fp32.onnx",
+        "url": "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx",
+        "sha256": "1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6",
+        "license": "Apache-2.0 (LaMa, Samsung AI Center; ONNX export by Carve)",
+        "purpose": "Bereich entfernen / retuschieren",
+        "size_mb": 204,
+        "required": True,
+    },
+    {
+        "name": "u2netp.onnx",
+        "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx",
+        "sha256": "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8",
+        "license": "Apache-2.0 (U^2-Net, Xuebin Qin et al.)",
+        "purpose": "Motiv freistellen / Hintergrund bearbeiten",
+        "size_mb": 5,
+        "required": False,
+    },
+)
+
+MODEL_NAME = MODELS[0]["name"]
+MODEL_LICENSE = MODELS[0]["license"]
 
 #: Application files to copy.  Tests and assets are left out to keep the stick
 #: small; everything needed to run is included.
@@ -129,8 +150,9 @@ Inhalt
 ------
   app/                Das Programm
   wheels/             NumPy (+ Pillow) für 32-Bit-Windows
-  models/{model}      Das KI-Modell für die Bereichsentfernung {model_state}
-                      Lizenz: {license}
+  models/             Die KI-Modelle {model_state}
+                        lama_fp32.onnx  Bereich entfernen   (204 MB, Apache-2.0)
+                        u2netp.onnx     Motiv freistellen   (5 MB, Apache-2.0)
 
 Installation auf dem Laptop
 ---------------------------
@@ -148,6 +170,7 @@ Installation auf dem Laptop
 
  5. Im Programm: Verarbeitung → KI-Modelldatei wählen… und
     ..\\models\\{model} auswählen (nur einmal nötig).
+    Der Ordner models\\ wird auch automatisch durchsucht.
 
 Prüfen, ob alles passt:  py -3-32 app\\tools\\check_system.py
 Ausführliche Anleitung:  app\\docs\\OFFLINE-INSTALL.md
@@ -156,8 +179,7 @@ Ausführliche Anleitung:  app\\docs\\OFFLINE-INSTALL.md
         text.format(
             wheels=wheels,
             model=MODEL_NAME,
-            model_state="" if model_ok else "(FEHLT - bitte nachladen!)",
-            license=MODEL_LICENSE,
+            model_state="" if model_ok else "(UNVOLLSTÄNDIG - bitte nachladen!)",
         ),
         encoding="utf-8",
     )
@@ -181,18 +203,21 @@ def main(argv=None) -> int:
         print("\n[2/3] NumPy wheels for 32-bit Windows")
         wheels = fetch_wheels(bundle / "wheels")
 
-    model_ok = False
+    model_ok = True
     if not args.skip_model:
-        print("\n[3/3] Neural network (204 MB)")
-        local = REPO / "models" / MODEL_NAME
-        target = bundle / "models" / MODEL_NAME
-        if local.is_file() and sha256(local) == MODEL_SHA256:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(local, target)
-            print("  copied from %s" % local)
-            model_ok = True
-        else:
-            model_ok = download(MODEL_URL, target, MODEL_SHA256)
+        total_mb = sum(model["size_mb"] for model in MODELS)
+        print("\n[3/3] Neural networks (%d MB)" % total_mb)
+        for model in MODELS:
+            print("  %s - %s" % (model["name"], model["purpose"]))
+            local = REPO / "models" / model["name"]
+            target = bundle / "models" / model["name"]
+            if local.is_file() and sha256(local) == model["sha256"]:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(local, target)
+                print("    copied from %s" % local)
+                continue
+            if not download(model["url"], target, model["sha256"]) and model["required"]:
+                model_ok = False
 
     write_readme(bundle, wheels, model_ok)
     print("\nDone. Copy %s to the laptop and read LIESMICH.txt there." % bundle)

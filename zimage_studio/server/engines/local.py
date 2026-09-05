@@ -21,6 +21,7 @@ from typing import List, Optional, Sequence, Tuple
 from ...imaging import (
     MODE_L,
     MODE_RGB,
+    MODE_RGBA,
     ImageError,
     png_decode,
     png_encode,
@@ -28,10 +29,20 @@ from ...imaging import (
     to_rgb,
 )
 from ...localedit.adjust import apply_operation
-from ...localedit.commands import REMOVE, Command, describe_vocabulary, parse_prompt
+from ...localedit.commands import (
+    BACKGROUND_BLUR,
+    BACKGROUND_COLOR,
+    CUTOUT,
+    REMOVE,
+    SUBJECT_OPERATIONS,
+    Command,
+    describe_vocabulary,
+    parse_prompt,
+)
 from ...localedit.fill import content_aware_fill, mask_bounding_box
 from ...localedit.neural import NeuralInpainter, numpy_available
-from ...localedit.pixels import merge_planes, split_planes
+from ...localedit.pixels import box_blur, composite_by_mask, merge_planes, split_planes
+from ...localedit.segment import SubjectSegmenter
 from ...protocol import MODE_IMG2IMG, MODE_INPAINT, GenerateRequest, ServerInfo, decode_image
 from ...version import __version__
 from .base import Engine, EngineError, GenerationContext
@@ -43,9 +54,15 @@ NEUTRAL_AMOUNT = 0.6
 class LocalEngine(Engine):
     name = "local"
 
-    def __init__(self, model_path: Optional[str] = None, language: str = "de") -> None:
+    def __init__(
+        self,
+        model_path: Optional[str] = None,
+        language: str = "de",
+        segment_model_path: Optional[str] = None,
+    ) -> None:
         self.language = language
         self.inpainter = NeuralInpainter(model_path)
+        self.segmenter = SubjectSegmenter(segment_model_path)
         self._loaded = False
 
     # -- capabilities --------------------------------------------------
@@ -54,13 +71,29 @@ class LocalEngine(Engine):
     def neural(self) -> bool:
         return self.inpainter.available
 
+    @property
+    def can_segment(self) -> bool:
+        return self.segmenter.available
+
     def info(self) -> ServerInfo:
+        networks = []
+        details = []
         if self.neural:
-            model = "LaMa (51M) + local adjustments"
-            detail = "Neural inpainting active: %s" % self.inpainter.model_path
+            networks.append("LaMa (51M)")
+            details.append("inpainting: %s" % self.inpainter.model_path)
+        else:
+            details.append(self.inpainter.describe())
+        if self.can_segment:
+            networks.append("U^2-Net (1.1M)")
+            details.append("subject detection: %s" % self.segmenter.model_path)
+        else:
+            details.append(self.segmenter.describe())
+
+        if networks:
+            model = " + ".join(networks) + " + local adjustments"
         else:
             model = "local adjustments (no neural model)"
-            detail = self.inpainter.describe()
+        detail = " | ".join(details)
         return ServerInfo(
             name="Z-Image Studio (local)",
             version=__version__,
@@ -100,6 +133,7 @@ class LocalEngine(Engine):
             )
 
         strength = float(request.strength)
+        alpha: Optional[bytes] = None
         total = len(commands)
         for index, command in enumerate(commands):
             ctx.progress(index, total, command.name)
@@ -109,12 +143,18 @@ class LocalEngine(Engine):
                         "Zum Entfernen bitte den Bereich mit dem Pinsel markieren."
                     )
                 planes = self._remove(planes, width, height, mask, ctx, index, total, request)
+            elif command.name in SUBJECT_OPERATIONS:
+                planes, alpha = self._subject(planes, width, height, command, ctx, index, total)
             else:
                 planes = self._adjust(planes, width, height, mask, command, strength)
         ctx.progress(total, total, "done")
 
-        merged = merge_planes(planes)
-        png = png_encode(width, height, bytes(merged), MODE_RGB)
+        if alpha is not None:
+            merged = _merge_rgba(planes, alpha)
+            png = png_encode(width, height, bytes(merged), MODE_RGBA)
+        else:
+            merged = merge_planes(planes)
+            png = png_encode(width, height, bytes(merged), MODE_RGB)
         seed = request.seed if request.seed >= 0 else int(time.time()) % (2**31 - 1)
         return [png], seed
 
@@ -171,6 +211,45 @@ class LocalEngine(Engine):
                 "oder einen kleineren Bereich markieren."
             ) from exc
 
+    def _subject(
+        self,
+        planes: Sequence[bytes],
+        width: int,
+        height: int,
+        command: Command,
+        ctx: GenerationContext,
+        step: int,
+        total: int,
+    ) -> Tuple[List[bytes], Optional[bytes]]:
+        """Detect the subject and either cut it out or treat the background."""
+        if not self.can_segment:
+            raise EngineError(
+                "Für das automatische Freistellen fehlt das Modell u2netp.onnx.\n%s"
+                % self.segmenter.describe()
+            )
+
+        def on_node(done: int, nodes: int, op: str) -> None:
+            ctx.progress(
+                int((step + done / float(max(1, nodes))) * 1000 / max(1, total)),
+                1000,
+                "subject detection (%d%%)" % int(100 * done / max(1, nodes)),
+            )
+
+        mask = self.segmenter.mask(planes, width, height, progress=on_node)
+
+        if command.name == CUTOUT:
+            return list(planes), mask
+        if command.name == BACKGROUND_COLOR:
+            color = command.options.get("color", (255, 255, 255))
+            size = width * height
+            solid = [bytes((channel,)) * size for channel in color]
+            return composite_by_mask(planes, solid, mask), None
+        if command.name == BACKGROUND_BLUR:
+            passes = max(2, int(round(2 + 8 * command.amount)))
+            blurred = [box_blur(plane, width, height, passes) for plane in planes]
+            return composite_by_mask(planes, blurred, mask), None
+        raise EngineError("unbekannte Hintergrund-Operation %r" % command.name)
+
     def _adjust(
         self,
         planes: Sequence[bytes],
@@ -220,3 +299,13 @@ def _blend_masked(
                     start + (other[channel][index] - start) * weight // 255
                 ) & 0xFF
     return [bytes(plane) for plane in result]
+
+
+def _merge_rgba(planes: Sequence[bytes], alpha: bytes) -> bytearray:
+    """Interleave three planes plus an alpha channel into RGBA bytes."""
+    size = len(planes[0])
+    out = bytearray(size * 4)
+    for channel in range(3):
+        out[channel::4] = planes[channel]
+    out[3::4] = alpha
+    return out

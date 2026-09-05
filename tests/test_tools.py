@@ -87,7 +87,7 @@ def test_bundle_readme_names_every_step(tmp_path):
 def test_bundle_readme_warns_when_the_model_is_missing(tmp_path):
     bundle = _load("build_offline_bundle")
     bundle.write_readme(tmp_path, wheels=0, model_ok=False)
-    assert "FEHLT" in (tmp_path / "LIESMICH.txt").read_text(encoding="utf-8")
+    assert "UNVOLLSTÄNDIG" in (tmp_path / "LIESMICH.txt").read_text(encoding="utf-8")
 
 
 def test_bundle_checksum_matches_hashlib(tmp_path):

@@ -18,6 +18,18 @@ from .adjust import COLORS
 
 #: The operation that hands the work to the inpainting network.
 REMOVE = "remove"
+#: Operations that need the subject-detection network.
+CUTOUT = "cutout"
+BACKGROUND_COLOR = "background_color"
+BACKGROUND_BLUR = "background_blur"
+SUBJECT_OPERATIONS = (CUTOUT, BACKGROUND_COLOR, BACKGROUND_BLUR)
+
+#: Words that mean "the background" in either language.
+BACKGROUND_WORDS = ("hintergrund", "background")
+#: Words that, together with "background", mean "cut the subject out".
+CUTOUT_STEMS = ("freistell", "cut out", "cutout", "transparent", "ausschneid")
+_BACKGROUND_BLUR_STEMS = ("unscharf", "weichzeichn", "verwisch", "blur", "bokeh")
+_BACKGROUND_REMOVE_STEMS = ("entfern", "weg", "lösch", "remove", "delete", "erase", "raus")
 
 #: Stems that select an operation.  Longer stems win, so "weniger kontrast"
 #: beats "kontrast".
@@ -189,6 +201,24 @@ def _find_color(text: str) -> Optional[str]:
     return None
 
 
+def _background_command(text: str, amount: float) -> Optional[Command]:
+    """Read a background instruction, which outranks the generic vocabulary.
+
+    "Hintergrund entfernen" must not be read as plain "entfernen", and
+    "Hintergrund unscharf" not as a blur of the whole picture.
+    """
+    if not any(word in text for word in BACKGROUND_WORDS):
+        return None
+    if any(stem in text for stem in _BACKGROUND_BLUR_STEMS):
+        return Command(BACKGROUND_BLUR, amount)
+    color = _find_color(text)
+    if color:
+        return Command(BACKGROUND_COLOR, amount, {"color": COLORS[color]})
+    if any(stem in text for stem in _BACKGROUND_REMOVE_STEMS):
+        return Command(CUTOUT, amount)
+    return Command(CUTOUT, amount)
+
+
 def parse_prompt(prompt: str, *, has_mask: bool = False) -> List[Command]:
     """Read an instruction and return the operations it asks for.
 
@@ -199,6 +229,13 @@ def parse_prompt(prompt: str, *, has_mask: bool = False) -> List[Command]:
     amount = _intensity(text)
     commands: List[Command] = []
     seen = set()
+
+    if any(stem in text for stem in CUTOUT_STEMS):
+        return [Command(CUTOUT, amount)]
+
+    background = _background_command(text, amount)
+    if background is not None:
+        return [background]
 
     for stem, operation in VOCABULARY:
         if stem not in text:
@@ -231,6 +268,8 @@ def describe_vocabulary(language: str = "de") -> str:
         return (
             "Was der lokale Modus versteht:\n"
             "  entfernen / retuschieren / weg    – markierten Bereich wegrechnen (KI)\n"
+            "  freistellen · hintergrund weg     – Motiv automatisch freistellen (KI)\n"
+            "  hintergrund weiß / unscharf       – Hintergrund ersetzen oder weichzeichnen\n"
             "  heller · dunkler · kontrast      – Helligkeit und Kontrast\n"
             "  schwarzweiß · sepia · farbiger   – Farbwirkung\n"
             "  wärmer · kühler · blasser        – Farbstimmung\n"
@@ -243,6 +282,8 @@ def describe_vocabulary(language: str = "de") -> str:
     return (
         "What the local mode understands:\n"
         "  remove / erase / clean up        - inpaint the brushed area (neural network)\n"
+        "  cut out · remove background      - detect the subject automatically (network)\n"
+        "  background white / blurred       - replace or blur the background\n"
         "  brighter · darker · contrast     - brightness and contrast\n"
         "  black and white · sepia · vivid  - colour treatment\n"
         "  warmer · cooler · muted          - colour mood\n"

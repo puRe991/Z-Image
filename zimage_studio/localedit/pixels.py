@@ -181,6 +181,43 @@ def weighted_mix(first: bytes, second: bytes, amount: float, *, steps: int = 64)
     return _narrow(total >> shift, count)
 
 
+_HARD_HIGH = bytes(255 if value >= 250 else 0 for value in range(256))
+_HARD_LOW = bytes(255 if value <= 5 else 0 for value in range(256))
+
+
+def composite_by_mask(
+    base: Sequence[bytes], other: Sequence[bytes], mask: bytes
+) -> List[bytes]:
+    """Blend two images through a soft mask: 255 keeps ``base``, 0 takes ``other``.
+
+    A segmentation mask is almost entirely 0 or 255 with a thin soft edge, so the
+    two flat regions are selected with one big-integer bitwise operation per
+    plane and only the edge pixels go through a Python loop.
+    """
+    keep = mask.translate(_HARD_HIGH)
+    take = mask.translate(_HARD_LOW)
+    keep_int = int.from_bytes(keep, "little")
+    take_int = int.from_bytes(take, "little")
+    count = len(mask)
+
+    soft = [index for index, value in enumerate(mask) if 5 < value < 250]
+    result: List[bytes] = []
+    for base_plane, other_plane in zip(base, other):
+        merged = bytearray(
+            (
+                (int.from_bytes(base_plane, "little") & keep_int)
+                | (int.from_bytes(other_plane, "little") & take_int)
+            ).to_bytes(count, "little")
+        )
+        for index in soft:
+            weight = mask[index]
+            merged[index] = (
+                other_plane[index] + (base_plane[index] - other_plane[index]) * weight // 255
+            ) & 0xFF
+        result.append(bytes(merged))
+    return result
+
+
 def box_blur(plane: bytes, width: int, height: int, passes: int = 1) -> bytes:
     """Repeated neighbour averaging - a cheap approximation of a Gaussian."""
     result = plane

@@ -267,3 +267,74 @@ def test_unknown_words_produce_nothing():
 def test_vocabulary_help_is_available_in_both_languages():
     assert "entfernen" in commands.describe_vocabulary("de")
     assert "remove" in commands.describe_vocabulary("en")
+
+
+# ----------------------------------------------------------------------
+# soft-mask compositing (used by the background operations)
+# ----------------------------------------------------------------------
+
+
+def test_composite_by_mask_selects_the_flat_regions():
+    base = [bytes([10, 10, 10, 10])] * 3
+    other = [bytes([200, 200, 200, 200])] * 3
+    mask = bytes([255, 0, 255, 0])
+    result = pixels.composite_by_mask(base, other, mask)
+    assert list(result[0]) == [10, 200, 10, 200]
+
+
+def test_composite_by_mask_blends_the_soft_edge():
+    base = [bytes([0, 0, 0])] * 3
+    other = [bytes([200, 200, 200])] * 3
+    mask = bytes([255, 128, 0])
+    result = pixels.composite_by_mask(base, other, mask)
+    assert result[0][0] == 0
+    assert 80 < result[0][1] < 120  # halfway
+    assert result[0][2] == 200
+
+
+def test_composite_by_mask_keeps_the_plane_length():
+    size = 1000
+    base = [bytes([7]) * size] * 3
+    other = [bytes([9]) * size] * 3
+    mask = bytes([255] * 500 + [0] * 500)
+    result = pixels.composite_by_mask(base, other, mask)
+    assert all(len(plane) == size for plane in result)
+    assert result[0][0] == 7 and result[0][-1] == 9
+
+
+# ----------------------------------------------------------------------
+# background instructions
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "prompt,expected",
+    [
+        ("freistellen", "cutout"),
+        ("hintergrund entfernen", "cutout"),
+        ("hintergrund weg", "cutout"),
+        ("remove background", "cutout"),
+        ("cut out the subject", "cutout"),
+        ("hintergrund weiß", "background_color"),
+        ("hintergrund schwarz machen", "background_color"),
+        ("hintergrund unscharf", "background_blur"),
+        ("blur the background", "background_blur"),
+    ],
+)
+def test_background_instructions(prompt, expected):
+    parsed = commands.parse_prompt(prompt)
+    assert [command.name for command in parsed] == [expected]
+
+
+def test_background_instructions_outrank_the_generic_words():
+    """'Hintergrund entfernen' is not 'entfernen', and not a blur of everything."""
+    assert commands.parse_prompt("hintergrund entfernen")[0].name != commands.REMOVE
+    assert commands.parse_prompt("hintergrund unscharf")[0].name != "blur"
+    assert commands.parse_prompt("unscharf")[0].name == "blur"
+    assert commands.parse_prompt("entferne den fleck")[0].name == commands.REMOVE
+
+
+def test_background_colour_is_carried_through():
+    parsed = commands.parse_prompt("mach den hintergrund blau")
+    assert parsed[0].name == "background_color"
+    assert parsed[0].options["color"] == adjust.COLORS["blue"]

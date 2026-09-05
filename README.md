@@ -259,9 +259,15 @@ The client can do the work itself:
   and a 51M-parameter neural network ([LaMa](https://github.com/advimman/lama),
   Apache-2.0) fills the area from its surroundings. Roughly 11 seconds per edit
   on a desktop CPU, minutes on an old laptop.
+* **Cut out the subject** — `cut out` or `remove background` runs a second,
+  much smaller network ([U²-Net](https://github.com/xuebinqin/U-2-Net),
+  Apache-2.0, 5 MB) that finds the salient object by itself, giving a
+  transparent, flat-coloured or blurred background - no brushing needed.
 * **Adjust the image** — `a bit brighter`, `more contrast`, `black and white`,
   `sepia`, `warmer`, `sharpen`, `fill with black`… in German or English,
   applied to the brushed area or the whole picture.
+
+![Cut out and background treatments](docs/images/local-background.png)
 
 ### Why is this split like that?
 

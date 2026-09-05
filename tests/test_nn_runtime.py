@@ -312,3 +312,41 @@ def test_einsum_matches_onnxruntime(tmp_path):
     model.ir_version = 8
     mine, reference = _run_both(model.SerializeToString(), {"a": a, "b": b}, tmp_path)
     assert np.abs(mine - reference).max() < 1e-5
+
+
+# ----------------------------------------------------------------------
+# pooling
+# ----------------------------------------------------------------------
+
+
+def test_max_pool_matches_a_naive_implementation():
+    from zimage_studio.nn.ops import max_pool
+
+    rng = np.random.default_rng(12)
+    x = rng.standard_normal((1, 2, 6, 6)).astype(np.float32)
+    result = max_pool(x, kernel_shape=[2, 2], strides=[2, 2])
+    assert result.shape == (1, 2, 3, 3)
+    for channel in range(2):
+        for y in range(3):
+            for x_index in range(3):
+                window = x[0, channel, y * 2 : y * 2 + 2, x_index * 2 : x_index * 2 + 2]
+                assert abs(result[0, channel, y, x_index] - window.max()) < 1e-6
+
+
+def test_average_pool_matches_a_naive_implementation():
+    from zimage_studio.nn.ops import average_pool
+
+    rng = np.random.default_rng(13)
+    x = rng.standard_normal((1, 1, 4, 4)).astype(np.float32)
+    result = average_pool(x, kernel_shape=[2, 2], strides=[2, 2])
+    assert abs(result[0, 0, 0, 0] - x[0, 0, :2, :2].mean()) < 1e-6
+
+
+def test_max_pool_with_padding_and_ceil_mode():
+    from zimage_studio.nn.ops import max_pool
+
+    x = np.arange(25, dtype=np.float32).reshape(1, 1, 5, 5)
+    padded = max_pool(x, kernel_shape=[3, 3], strides=[2, 2], pads=[1, 1, 1, 1])
+    assert padded.shape == (1, 1, 3, 3)
+    ceiled = max_pool(x, kernel_shape=[2, 2], strides=[2, 2], ceil_mode=1)
+    assert ceiled.shape == (1, 1, 3, 3)

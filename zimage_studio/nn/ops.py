@@ -204,6 +204,88 @@ def conv_transpose(
 
 
 # ----------------------------------------------------------------------
+# pooling
+# ----------------------------------------------------------------------
+
+
+def _pool(x, kernel, strides, pads, dilations, auto_pad, ceil_mode, reducer, pad_value):
+    """Shared implementation of MaxPool and AveragePool over the trailing axes."""
+    kh, kw = kernel
+    stride = _pairs(strides, 2, 1)
+    dilation = _pairs(dilations, 2, 1)
+
+    if auto_pad in (b"SAME_UPPER", b"SAME_LOWER"):
+        top, bottom = _auto_pad_sizes(auto_pad, x.shape[2], kh, stride[0], dilation[0])
+        left, right = _auto_pad_sizes(auto_pad, x.shape[3], kw, stride[1], dilation[1])
+        pad_sizes = [top, left, bottom, right]
+    else:
+        raw = _pairs(pads, 4, 0)
+        pad_sizes = [raw[0], raw[1], raw[2], raw[3]]
+
+    if any(pad_sizes):
+        padded = np.pad(
+            x,
+            ((0, 0), (0, 0), (pad_sizes[0], pad_sizes[2]), (pad_sizes[1], pad_sizes[3])),
+            mode="constant",
+            constant_values=pad_value,
+        )
+    else:
+        padded = np.ascontiguousarray(x)
+
+    effective_h = (kh - 1) * dilation[0] + 1
+    effective_w = (kw - 1) * dilation[1] + 1
+    round_up = np.ceil if ceil_mode else np.floor
+    out_h = int(round_up((padded.shape[2] - effective_h) / float(stride[0]))) + 1
+    out_w = int(round_up((padded.shape[3] - effective_w) / float(stride[1]))) + 1
+
+    # ceil_mode may ask for one window past the edge; repeat the border for it.
+    needed_h = (out_h - 1) * stride[0] + effective_h
+    needed_w = (out_w - 1) * stride[1] + effective_w
+    if needed_h > padded.shape[2] or needed_w > padded.shape[3]:
+        padded = np.pad(
+            padded,
+            ((0, 0), (0, 0), (0, max(0, needed_h - padded.shape[2])), (0, max(0, needed_w - padded.shape[3]))),
+            mode="edge",
+        )
+
+    padded = np.ascontiguousarray(padded)
+    patches = _patches(padded, (kh, kw), stride, dilation, out_h, out_w)
+    return reducer(patches, axis=(4, 5))
+
+
+def max_pool(
+    x,
+    *,
+    kernel_shape,
+    strides=None,
+    pads=None,
+    dilations=None,
+    auto_pad: bytes = b"NOTSET",
+    ceil_mode: int = 0,
+):
+    return _pool(
+        np.asarray(x, dtype=np.float32), kernel_shape, strides, pads, dilations,
+        auto_pad, ceil_mode, np.max, -np.inf,
+    )
+
+
+def average_pool(
+    x,
+    *,
+    kernel_shape,
+    strides=None,
+    pads=None,
+    dilations=None,
+    auto_pad: bytes = b"NOTSET",
+    ceil_mode: int = 0,
+):
+    return _pool(
+        np.asarray(x, dtype=np.float32), kernel_shape, strides, pads, dilations,
+        auto_pad, ceil_mode, np.mean, 0.0,
+    )
+
+
+# ----------------------------------------------------------------------
 # normalisation and activations
 # ----------------------------------------------------------------------
 

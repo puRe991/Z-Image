@@ -445,6 +445,28 @@ class Interpreter:
     def _op_Softmax(self, node, inputs):
         return ops.softmax(inputs[0], axis=int(_attr(node, "axis", -1)))
 
+    def _op_MaxPool(self, node, inputs):
+        return ops.max_pool(
+            inputs[0],
+            kernel_shape=_attr(node, "kernel_shape"),
+            strides=_attr(node, "strides"),
+            pads=_attr(node, "pads"),
+            dilations=_attr(node, "dilations"),
+            auto_pad=_attr(node, "auto_pad", b"NOTSET"),
+            ceil_mode=int(_attr(node, "ceil_mode", 0) or 0),
+        )
+
+    def _op_AveragePool(self, node, inputs):
+        return ops.average_pool(
+            inputs[0],
+            kernel_shape=_attr(node, "kernel_shape"),
+            strides=_attr(node, "strides"),
+            pads=_attr(node, "pads"),
+            dilations=_attr(node, "dilations"),
+            auto_pad=_attr(node, "auto_pad", b"NOTSET"),
+            ceil_mode=int(_attr(node, "ceil_mode", 0) or 0),
+        )
+
     def _op_GlobalAveragePool(self, node, inputs):
         axes = tuple(range(2, inputs[0].ndim))
         return np.mean(inputs[0], axis=axes, keepdims=True)

@@ -12,6 +12,7 @@ laufende Kosten.
 | | |
 |---|---|
 | ✅ **Bereich mit KI ersetzen** | Ein neuronales Netz (LaMa, 51 Mio. Parameter) rechnet den markierten Bereich weg und setzt die Umgebung fort. Objekte entfernen, Personen retuschieren, Störer wegnehmen. |
+| ✅ **Motiv freistellen (KI)** | Ein zweites Netz (U²-Net, 1,1 Mio. Parameter) erkennt das Hauptmotiv von selbst – ohne Pinsel. Hintergrund transparent, einfarbig oder weichgezeichnet. |
 | ✅ **Bild-zu-Bild-Anpassungen** | Helligkeit, Kontrast, Farbe, Schärfe, Weichzeichnen – per Texteingabe gesteuert, sofort. |
 | ✅ **Vollständige Oberfläche** | Maske malen, Radierer, Zoom, Verlauf, Vergleich, Speichern. |
 | ❌ **Z-Image selbst** | Braucht ~12 GB Speicher und PyTorch; für 32-Bit technisch unmöglich (Details in [WINDOWS32.md](WINDOWS32.md)). Die Unterstützung bleibt im Programm für den Fall, dass später ein passender Rechner da ist. |
@@ -20,6 +21,8 @@ laufende Kosten.
 Kurz: **Bearbeiten ja, aus dem Nichts erfinden nein.**
 
 ![Objekt entfernen: links die gemalte Maske, rechts das Ergebnis](images/local-removal.png)
+
+![Freistellen ohne Pinsel: Original, transparent, weißer Hintergrund, unscharfer Hintergrund](images/local-background.png)
 
 ---
 
@@ -45,10 +48,12 @@ Ohne das Skript geht es auch von Hand:
 |---|---|
 | Python 3.11 **32-Bit** | python.org → Downloads → „Windows installer (32-bit)" |
 | `numpy‑1.24.4‑cp311‑cp311‑win32.whl` | pypi.org/project/numpy/1.24.4/#files |
-| `lama_fp32.onnx` | huggingface.co/Carve/LaMa-ONNX → `lama_fp32.onnx` |
+| `lama_fp32.onnx` (204 MB) | huggingface.co/Carve/LaMa-ONNX → `lama_fp32.onnx` |
+| `u2netp.onnx` (5 MB) | github.com/danielgatis/rembg → Releases → `u2netp.onnx` |
 
-Prüfsumme des Modells (SHA-256):
-`1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6`
+Prüfsummen (SHA-256):
+`1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6`  (lama_fp32.onnx)
+`309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8`  (u2netp.onnx)
 
 Alles zusammen auf einen USB-Stick. Benötigt werden etwa **300 MB**.
 
@@ -98,6 +103,16 @@ Alles zusammen auf einen USB-Stick. Benötigt werden etwa **300 MB**.
 
 ## Schritt 3 – Arbeiten
 
+### Motiv freistellen (ohne Pinsel)
+
+1. **Öffnen** (Strg+O).
+2. Ins Textfeld `freistellen` schreiben – oder `hintergrund weiß`,
+   `hintergrund unscharf`.
+3. **Generieren**. Das Netz erkennt das auffälligste Objekt selbst.
+
+Das Freistell-Netz erkennt *das* Hauptmotiv, nicht „die Person links". Sind
+mehrere Objekte im Bild, ist der Pinsel der zuverlässigere Weg.
+
 ### Etwas aus einem Foto entfernen
 
 1. **Öffnen** (Strg+O).
@@ -124,6 +139,10 @@ Textfeld nutzen, Beispiele:
 | `entrauschen` | Bildrauschen glätten |
 | `füll das mit schwarz` | Fläche einfärben |
 | `entferne den fleck und mach es heller` | Mehrere Schritte auf einmal |
+| `freistellen` | Motiv erkennen, Hintergrund transparent (PNG mit Alpha) |
+| `hintergrund entfernen` | dasselbe |
+| `hintergrund weiß` | Hintergrund einfarbig ersetzen |
+| `hintergrund unscharf` | Hintergrund weichzeichnen, Motiv bleibt scharf |
 
 Stärkewörter: `leicht`, `etwas`, `stark`, `sehr`. Zusätzlich wirkt der Regler
 **Stärke**. Ist ein Bereich markiert, gilt die Anpassung nur dort – sonst für
