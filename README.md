@@ -228,8 +228,11 @@ image.save("example.png")
 ## 🖥️ Z-Image Studio — desktop app for image-to-image editing
 
 A ready-to-run editing application ships with this repository: a GUI with a mask
-brush and a prompt box for **image-to-image** and **inpainting**, plus the
-backend that runs the weights.
+brush and a prompt box, and two ways to do the actual work.
+
+![Z-Image Studio](docs/images/zimage-studio.png)
+
+### On a machine with a GPU — Z-Image
 
 ```bash
 # Backend, on a 64-bit machine with a GPU (loads the weights on first use)
@@ -239,26 +242,41 @@ python -m zimage_studio.server --host 0.0.0.0 --port 8787
 python -m zimage_studio.client --server http://192.168.1.20:8787
 ```
 
-No GPU at hand? `python -m zimage_studio.client --demo` starts a procedural demo
-backend inside the client so the whole interface can be tried out.
+Image-to-image with a strength slider, inpainting with a feathered mask, prompt
+and negative prompt, steps, guidance and seed control, batches, live progress
+with cancel. `--demo` starts a procedural backend so the interface can be tried
+without weights.
 
-**Features**: image-to-image with a strength slider, inpainting with a brush /
-eraser / feathered mask, prompt and negative prompt, steps, guidance and seed
-control, batches of up to four images, live progress with cancel, before/after
-compare, result history you can iterate on, German and English UI, dark and
-light theme.
+### On a machine without one — local, offline editing
 
-**Why is it split in two?** The interface is deliberately dependency-free
-(standard library plus Tkinter, with a pure-Python PNG codec and mask
-rasteriser), so it also runs on a **32-bit Windows** Python, where PyTorch
-publishes no wheels and a process cannot address the ~12 GB the weights need.
-The model therefore runs in the backend - on the same 64-bit machine, another PC
-on the network, or a rented GPU box.
+```bash
+python -m zimage_studio.client          # no server, no network, no GPU
+```
 
-![Z-Image Studio](docs/images/zimage-studio.png)
+The client can do the work itself:
 
-See [`docs/WINDOWS32.md`](docs/WINDOWS32.md) for the full setup, packaging into a
-32-bit `ZImageStudio.exe`, keyboard shortcuts and troubleshooting (German).
+* **Remove an object** — brush over it, write `remove` (or leave the box empty)
+  and a 51M-parameter neural network ([LaMa](https://github.com/advimman/lama),
+  Apache-2.0) fills the area from its surroundings. Roughly 11 seconds per edit
+  on a desktop CPU, minutes on an old laptop.
+* **Adjust the image** — `a bit brighter`, `more contrast`, `black and white`,
+  `sepia`, `warmer`, `sharpen`, `fill with black`… in German or English,
+  applied to the brushed area or the whole picture.
+
+### Why is this split like that?
+
+The interface is dependency-free (standard library plus Tkinter, with a
+pure-Python PNG codec and mask rasteriser), so it runs on **32-bit Windows**,
+where PyTorch publishes no wheels and a process cannot address the ~12 GB
+Z-Image needs. For the local mode the networks run through a small ONNX
+interpreter built on NumPy — the one numeric library that still ships 32-bit
+Windows wheels — reproducing onnxruntime's output to 5e-04 while peaking at
+452 MB.
+
+See [`docs/OFFLINE-INSTALL.md`](docs/OFFLINE-INSTALL.md) for the offline setup
+on a single 32-bit laptop (German), [`docs/WINDOWS32.md`](docs/WINDOWS32.md) for
+the client/server setup and packaging, and [`docs/TESTING.md`](docs/TESTING.md)
+for the test-suite.
 
 ## 🔬 Decoupled-DMD: The Acceleration Magic Behind Z-Image
 

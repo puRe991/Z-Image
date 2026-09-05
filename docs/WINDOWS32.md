@@ -4,6 +4,12 @@ Diese Anleitung beschreibt die mitgelieferte Bild-zu-Bild-Anwendung: eine
 Desktop-Oberfläche mit Pinsel-Maske und Prompt-Eingabe, die auch auf einem
 32-Bit-Windows läuft, plus den Server, der die Z-Image-Gewichte rechnet.
 
+> **Kein zweiter Rechner, kein Internet?** Dann ist
+> [OFFLINE-INSTALL.md](OFFLINE-INSTALL.md) die richtige Anleitung: dort läuft die
+> Bearbeitung komplett auf dem Laptop selbst, mit einem kleinen neuronalen Netz
+> für das Entfernen von Objekten. Dieses Dokument beschreibt den Betrieb mit
+> Z-Image auf einem Rechner mit GPU.
+
 ![Z-Image Studio: Quellbild mit gemalter Maske, Prompt-Feld und Reglern](images/zimage-studio.png)
 
 ---
